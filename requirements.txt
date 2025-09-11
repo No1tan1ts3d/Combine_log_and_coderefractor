@@ -1,9 +1,8 @@
 streamlit
-typing
 hashlib
-functools 
-base64
+functools
 zlib
 pandas
 numpy
+
 
