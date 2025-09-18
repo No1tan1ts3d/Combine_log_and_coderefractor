@@ -10,8 +10,8 @@ st.markdown(
 """
 )
 
-create_page = st.Page("fin1.py", title="Log Parser", icon=":material/add_circle:")
-delete_page = st.Page("test1.py", title="Code Refractor", icon=":material/delete:")
+create_page = st.Page("Log-visualizer-fin1.py", title="Log Parser", icon=":material/add_circle:")
+delete_page = st.Page("Code_refractor.py", title="Code Refractor", icon=":material/delete:")
 
 pg = st.navigation([create_page, delete_page])
 st.set_page_config(page_title="Data manager", page_icon=":material/edit:")
@@ -21,4 +21,5 @@ st.set_page_config(
     page_title="Ai Tools Hub",
     page_icon="👋",
 )
+
 
