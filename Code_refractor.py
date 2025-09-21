@@ -2,6 +2,7 @@ import re
 import streamlit as st
 import zipfile
 import io
+import os
 from typing import List, Tuple, Dict, Optional
 
 
@@ -627,8 +628,7 @@ def detect_function_calls(line: str) -> List[str]:
     return calls
 
 
-# --- Body instrumentation ---
-
+# --- Body instrumentation modification ---
 def instrument_body_for_values(body: str,
                                func_name: str,
                                log_style: str,
@@ -640,7 +640,6 @@ def instrument_body_for_values(body: str,
                                known_types: Dict[str, str],
                                is_kernel_driver: bool = False) -> str:
     lines = body.split('\n')
-    # First pass: collect simple declarations into known_types
     for ln in lines:
         dec = detect_simple_declaration(ln)
         if dec:
@@ -649,36 +648,31 @@ def instrument_body_for_values(body: str,
 
     new_lines: List[str] = []
     declarations_ended = False
-    
-    # Find where declarations end for C90 compliance
     decl_end_idx = find_declarations_end(body)
     char_count = 0
-    
+
     for ln in lines:
         new_lines.append(ln)
-        char_count += len(ln) + 1  # +1 for newline
-        
-        # Skip preprocessor
+        char_count += len(ln) + 1
         stripped = ln.lstrip()
         if not stripped or stripped.startswith('#'):
             continue
         indent = ln[: len(ln) - len(stripped)]
-        
-        # Check if we've passed the declarations section
+
         if not declarations_ended and char_count > decl_end_idx:
             declarations_ended = True
-
-        # Only add instrumentation after declarations end (C90 compliance)
         if not declarations_ended:
             continue
 
-        # Control flow entries
-        if print_control and re.match(r'^\s*(if|else\s+if|else\b|for|while|switch|case\b|default\b)', strip_line_comment_aware(ln)):
+        # Control flow entries with single-line if check
+        if print_control and re.match(r'^\s*(if|else\s+if|else|for|while|switch|case|default)\b', strip_line_comment_aware(ln)):
+            # Skip single-line if without braces
+            if re.match(r'^\s*if\s*\([^)]*\)\s*[^;{]+;\s*$', stripped):
+                continue
             msg = build_value_log(log_style, f'control in {func_name}', '%s', '"' + stripped.split('{')[0].strip().replace('"', '\\"') + '"', device_expr, is_kernel_driver)
             new_lines.append(indent + msg)
 
-        # Declarations with initializer (only after declarations section)
-        if print_decls and declarations_ended:
+        if print_decls:
             dec = detect_simple_declaration(ln)
             if dec:
                 var_name, type_str, has_init = dec
@@ -686,8 +680,7 @@ def instrument_body_for_values(body: str,
                     fmt = printf_format_for_type(type_str)
                     new_lines.append(indent + build_value_log(log_style, var_name, fmt, var_name, device_expr, is_kernel_driver))
 
-        # Assignments
-        if print_assigns and declarations_ended:
+        if print_assigns:
             asg = detect_simple_assignment(ln)
             if asg:
                 var_name, op = asg
@@ -695,8 +688,7 @@ def instrument_body_for_values(body: str,
                 fmt = printf_format_for_type(type_str)
                 new_lines.append(indent + build_value_log(log_style, var_name, fmt, var_name, device_expr, is_kernel_driver))
 
-        # Function calls
-        if print_calls and declarations_ended:
+        if print_calls:
             calls = detect_function_calls(ln)
             for c in calls:
                 new_lines.append(indent + build_value_log(log_style, f'calling {c}', '%s', '""', device_expr, is_kernel_driver))
@@ -704,8 +696,7 @@ def instrument_body_for_values(body: str,
     return '\n'.join(new_lines)
 
 
-# --- Top-level function detection and instrumentation ---
-
+# --- Top-level function detection modification ---
 def add_debug_statements(code: str,
                          log_style: str = "printf",
                          device_expr: str = "",
@@ -716,7 +707,7 @@ def add_debug_statements(code: str,
                          print_assigns: bool = True,
                          print_calls: bool = True,
                          print_control: bool = False,
-                         final_exit_always: bool = True,
+                         final_exit_always: bool = False,
                          is_kernel_driver: bool = False) -> str:
     params_pattern = r'(?:[^(){}]|\([^()]*\))*'
     func_re = re.compile(
@@ -736,7 +727,6 @@ def add_debug_statements(code: str,
         header_end = m.end(0)
         func_name = m.group('name')
         params_src = m.group('params')
-        # Find the opening brace within the header span
         open_brace_index = code.find('{', header_start, header_end)
         if open_brace_index == -1:
             continue
@@ -744,10 +734,8 @@ def add_debug_statements(code: str,
         if close_brace_index == -1:
             continue
 
-        # Append code before this function unchanged up to '{'
         result_parts.append(code[last_index:open_brace_index + 1])
 
-        # Determine base indentation inside function
         after_brace_newline = code.find('\n', open_brace_index, close_brace_index)
         base_indent = ''
         if after_brace_newline != -1:
@@ -767,19 +755,12 @@ def add_debug_statements(code: str,
 
         entry_line = build_log_line(log_style, func_name, device_expr, is_kernel_driver)
         exit_line = build_exit_log_line(log_style, func_name, device_expr, is_kernel_driver)
-
-        # Function body (excluding outer braces)
         body = code[open_brace_index + 1:close_brace_index]
-
-        # Avoid duplicate insertion if already instrumented
         already_instrumented = (f'entered function {func_name}' in body) or (f'exiting function {func_name}' in body)
-
         new_body = body
+
         if not already_instrumented:
-            # For C90 compliance, find where declarations end
             decl_end_idx = find_declarations_end(body)
-            
-            # Split body at declaration boundary
             if decl_end_idx > 0:
                 decl_part = body[:decl_end_idx]
                 code_part = body[decl_end_idx:]
@@ -787,13 +768,10 @@ def add_debug_statements(code: str,
                 decl_part = ""
                 code_part = body
 
-            # Prepare instrumentation lines
             instrumentation_lines: List[str] = []
-            
             if add_entry_exit:
                 instrumentation_lines.append(f"{base_indent}{entry_line}")
 
-            # Parameter prints
             known_types: Dict[str, str] = {}
             if print_params and params_src.strip() and params_src.strip() != 'void':
                 for raw in split_params(params_src):
@@ -805,19 +783,15 @@ def add_debug_statements(code: str,
                     fmt = printf_format_for_type(ptype)
                     instrumentation_lines.append(f"{base_indent}{build_value_log(log_style, pname, fmt, pname, device_expr, is_kernel_driver)}")
 
-            # Insert instrumentation after declarations
             instrumentation_block = '\n' + '\n'.join(instrumentation_lines) + '\n'
-            
             if decl_part:
                 new_body = decl_part + instrumentation_block + code_part
             else:
                 new_body = instrumentation_block + code_part
 
-            # Add exit before returns if enabled
             if add_exit_before_returns:
                 new_body = insert_exit_before_returns(new_body, exit_line, base_indent, log_style, device_expr, is_kernel_driver)
 
-            # Instrument body internals
             new_body = instrument_body_for_values(new_body,
                                                  func_name,
                                                  log_style,
@@ -829,22 +803,16 @@ def add_debug_statements(code: str,
                                                  known_types,
                                                  is_kernel_driver)
 
-            # Ensure final exit if requested
             if final_exit_always:
                 if not new_body.endswith('\n'):
                     new_body += '\n'
                 new_body += f"{base_indent}{exit_line}\n"
 
-        # Append modified body and closing brace
         result_parts.append(new_body)
         result_parts.append('}')
-
-        # Move last_index
         last_index = close_brace_index + 1
 
-    # Append the remainder of the code
     result_parts.append(code[last_index:])
-
     return ''.join(result_parts)
 
 
@@ -878,26 +846,33 @@ def add_kernel_includes(code: str, is_kernel_driver: bool) -> str:
     lines[insert_index:insert_index] = kernel_includes
     return '\n'.join(lines)
 
-
-def create_zip_download(modified_files: Dict[str, str]) -> bytes:
-    """Create a zip file containing all modified files"""
+def safe_read_file(file) -> Tuple[str, Optional[str]]:
+    """Safely read file content with error handling"""
+    try:
+        content = file.getvalue().decode("utf-8", errors="ignore")
+        return content, None
+    except Exception as e:
+        return "", f"Error reading file {file.name}: {str(e)}"
+    
+    
+def create_zip_download(files: Dict[str, str]) -> bytes:
+    """Create a zip file containing the modified files"""
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for filename, content in modified_files.items():
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for filename, content in files.items():
             zip_file.writestr(filename, content)
-    zip_buffer.seek(0)
-    return zip_buffer.read()
-
+    return zip_buffer.getvalue()
 
 # ---- Streamlit UI ----
 
 st.set_page_config(layout="wide")
 
-st.title("C/C++ Code Refractor - Updated")
+st.title("C/C++ Code Refractor : Remodified with C90 Compliance")
 
 st.write(
     "Paste your C/C++ code or upload files. The app instruments function entry/exit, parameters, "
-    "declarations, assignments, and calls by placing debug statements. "
+    "declarations, assignments, and calls while ensuring C90 compliance by placing debug statements "
+    "after variable declarations."
 )
 
 # Input method
@@ -911,7 +886,7 @@ if input_method == "Paste code":
 st.subheader("Instrumentation Context")
 mode = st.toggle("Toggle to turn on Kernel Driver Mode (QDMA)", value=False)
 is_kernel_driver = mode
-st.caption(f"Selected Mode: {'Kernel Driver Code (C90 Compliant)' if is_kernel_driver else 'User Space Code'}") 
+st.caption(f"Selected Mode: {'Kernel Driver Code (C90 Compliant)' if is_kernel_driver else 'User Space Code'}")
 
 # Logging style options
 st.subheader("Logging options")
@@ -928,21 +903,29 @@ if log_style == "dev_dbg":
         placeholder="port->dev"
     )
 
-st.subheader("Instrumentation toggles")
-add_entry_exit = st.checkbox("Add entry/exit logs", value=True)
+# New fine-grained instrumentation selection
+st.subheader("Instrumentation Categories")
+debug_options = st.multiselect(
+    "Select what to instrument:",
+    ["Function Entry/Exit", "Variable Prints", "Control Flow"],
+    default=["Function Entry/Exit", "Variable Prints"]
+)
+
+add_entry_exit = "Function Entry/Exit" in debug_options
+print_params = "Variable Prints" in debug_options
+print_decls = "Variable Prints" in debug_options
+print_assigns = "Variable Prints" in debug_options
+print_calls  = "Variable Prints" in debug_options
+print_control = "Control Flow" in debug_options
+
 add_exit_before_returns = st.checkbox("Add exit before each return", value=True)
-print_params = st.checkbox("Print parameter values at entry", value=True)
-print_decls = st.checkbox("Print initial values for simple declarations", value=True)
-print_assigns = st.checkbox("Print values after simple assignments", value=True)
-print_calls = st.checkbox("Print when calling functions (best-effort)", value=True)
-print_control = st.checkbox("Print control-flow entries (if/for/while/switch)", value=False)
-final_exit_always = st.checkbox("Always append a final exit log", value=True)
+final_exit_always = st.checkbox("Always append a final exit log", value=False)
 
 # Single file processing
 if input_method == "Paste code" and code:
     if is_kernel_driver:
         code = add_kernel_includes(code, is_kernel_driver)
-    
+
     modified_code = add_debug_statements(
         code,
         log_style=log_style,
@@ -958,13 +941,10 @@ if input_method == "Paste code" and code:
         is_kernel_driver=is_kernel_driver,
     )
 
-    # Side-by-side layout
     col1, col2 = st.columns(2)
-    
     with col1:
         st.subheader("Original Code:")
         st.code(code, language="cpp")
-    
     with col2:
         st.subheader("Modified Code with Debug Prints:")
         st.code(modified_code, language="cpp")
@@ -981,113 +961,133 @@ elif input_method == "Upload file":
     uploaded_files = st.file_uploader("Choose C/C++ files", type=["c", "cpp", "h", "hpp"], accept_multiple_files=True)
     
     if uploaded_files:
-        modified_files = {}
-        
-        # Process all files
+        # Add file size validation
+        MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+        valid_files = []
         for file in uploaded_files:
-            code = file.read().decode("utf-8", errors="ignore")
-            if is_kernel_driver:
-                code = add_kernel_includes(code, is_kernel_driver)
+            if file.size > MAX_FILE_SIZE:
+                st.error(f"File {file.name} is too large (max {MAX_FILE_SIZE/1024/1024:.1f}MB)")
+                continue
+            valid_files.append(file)
             
-            modified_code = add_debug_statements(
-                code,
-                log_style=log_style,
-                device_expr=device_expr,
-                add_entry_exit=add_entry_exit,
-                add_exit_before_returns=add_exit_before_returns,
-                print_params=print_params,
-                print_decls=print_decls,
-                print_assigns=print_assigns,
-                print_calls=print_calls,
-                print_control=print_control,
-                final_exit_always=final_exit_always,
-                is_kernel_driver=is_kernel_driver,
-            )
+        if valid_files:
+            modified_files = {}
+            progress_text = "Processing files..."
             
-            modified_files[f"modified_{file.name}"] = modified_code
-        
-        # Bulk download button
-        if len(modified_files) > 1:
-            st.subheader("Bulk Download")
-            zip_data = create_zip_download(modified_files)
-            st.download_button(
-                label=f"📦 Download All Modified Files ({len(modified_files)} files)",
-                data=zip_data,
-                file_name="modified_code_files.zip",
-                mime="application/zip",
-                type="primary"
-            )
-            st.write("---")
-        
-        # Display files in tabs
-        if len(uploaded_files) == 1:
-            file = uploaded_files[0]
-            code = file.read().decode("utf-8", errors="ignore")
-            if is_kernel_driver:
-                code = add_kernel_includes(code, is_kernel_driver)
-            
-            modified_code = add_debug_statements(
-                code,
-                log_style=log_style,
-                device_expr=device_expr,
-                add_entry_exit=add_entry_exit,
-                add_exit_before_returns=add_exit_before_returns,
-                print_params=print_params,
-                print_decls=print_decls,
-                print_assigns=print_assigns,
-                print_calls=print_calls,
-                print_control=print_control,
-                final_exit_always=final_exit_always,
-                is_kernel_driver=is_kernel_driver,
-            )
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader(f"Original Code - {file.name}")
-                st.code(code, language="cpp")
-            
-            with col2:
-                st.subheader(f"Modified Code - {file.name}")
-                st.code(modified_code, language="cpp")
-                
-            st.download_button(
-                label=f"Download Modified {file.name}",
-                data=modified_code,
-                file_name=f"modified_{file.name}",
-                mime="text/x-c"
-            )
-        else:
-            file_tabs = st.tabs([f.name for f in uploaded_files])
-            for tab, file in zip(file_tabs, uploaded_files):
-                with tab:
-                    code = file.read().decode("utf-8", errors="ignore")
-                    modified_code = modified_files[f"modified_{file.name}"]
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.subheader(f"Original Code - {file.name}")
-                        st.code(code, language="cpp")
-                    
-                    with col2:
-                        st.subheader(f"Modified Code - {file.name}")
-                        st.code(modified_code, language="cpp")
+            # Process all files with progress bar
+            progress_bar = st.progress(0)
+            with st.spinner(progress_text):
+                for idx, file in enumerate(valid_files):
+                    content, error = safe_read_file(file)
+                    if error:
+                        st.error(error)
+                        continue
                         
+                    if is_kernel_driver:
+                        content = add_kernel_includes(content, is_kernel_driver)
+
+                    modified_code = add_debug_statements(
+                        content,
+                        log_style=log_style,
+                        device_expr=device_expr,
+                        add_entry_exit=add_entry_exit,
+                        add_exit_before_returns=add_exit_before_returns,
+                        print_params=print_params,
+                        print_decls=print_decls,
+                        print_assigns=print_assigns,
+                        print_calls=print_calls,
+                        print_control=print_control,
+                        final_exit_always=final_exit_always,
+                        is_kernel_driver=is_kernel_driver,
+                    )
+
+                    modified_files[f"modified_{file.name}"] = modified_code
+                    progress_bar.progress((idx + 1) / len(valid_files))
+                
+            progress_bar.empty()
+            st.success("✅ Processing complete!")
+
+            # Bulk download for multiple files
+            if len(modified_files) > 1:
+                st.subheader("Bulk Download")
+                zip_data = create_zip_download(modified_files)
+                st.download_button(
+                    label=f"📦 Download All Modified Files ({len(modified_files)} files)",
+                    data=zip_data,
+                    file_name="modified_code_files.zip",
+                    mime="application/zip",
+                    type="primary"
+                )
+                st.write("---")
+
+            # Display files in tabs or side by side
+            if len(valid_files) == 1:
+                file = valid_files[0]
+                content, error = safe_read_file(file)
+                if error:
+                    st.error(error)
+                else:
+                    original_code = content
+                    modified_code = modified_files[f"modified_{file.name}"]
+
+                    # Side-by-side display
+                    st.write("### Code Comparison")
+                    left_col, right_col = st.columns(2)
+                    
+                    with left_col:
+                        st.markdown(f"**Original Code - {file.name}**")
+                        st.code(original_code, language="cpp")
+                    
+                    with right_col:
+                        st.markdown(f"**Modified Code - {file.name}**")
+                        st.code(modified_code, language="cpp")
+
                     st.download_button(
                         label=f"Download Modified {file.name}",
                         data=modified_code,
                         file_name=f"modified_{file.name}",
-                        mime="text/x-c",
-                        key=f"download_{file.name}"
+                        mime="text/x-c"
                     )
+            else:
+                # Multiple files in tabs
+                file_tabs = st.tabs([f.name for f in valid_files])
+                for tab, file in zip(file_tabs, valid_files):
+                    with tab:
+                        content, error = safe_read_file(file)
+                        if error:
+                            st.error(error)
+                            continue
+                            
+                        modified_code = modified_files[f"modified_{file.name}"]
+
+                        # Side-by-side display in tabs
+                        left_col, right_col = st.columns(2)
+                        
+                        with left_col:
+                            st.markdown(f"**Original Code - {file.name}**")
+                            st.code(content, language="cpp")
+                        
+                        with right_col:
+                            st.markdown(f"**Modified Code - {file.name}**")
+                            st.code(modified_code, language="cpp")
+
+                        st.download_button(
+                            label=f"Download Modified {file.name}",
+                            data=modified_code,
+                            file_name=f"modified_{file.name}",
+                            mime="text/x-c",
+                            key=f"download_{file.name}"
+                        )
 
 # Help section
-with st.expander("ℹ️Tool Information : updated on 16th September 2025 - Manjil"):
+with st.expander("ℹ️ Tool Information"):
     st.markdown("""
-   
     **How this tool helps:**
-        **Analyzes your code** to find where variable declarations end  
-        **Places debug statements** after all declarations in each scope  
-        **Maintains proper formatting** and indentation  
-        **Avoids compilation errors** from mixed declarations and code  
-    
+
+    ✅ **Analyzes your code** to find where variable declarations end  
+    ✅ **Places debug statements** after all declarations in each scope  
+    ✅ **Maintains proper formatting** and indentation  
+    ✅ **Avoids compilation errors** from mixed declarations and code  
+
     """)
+
