@@ -1,7 +1,7 @@
 # Combine_log_and_coderefractor
 ## Clone this repo and directly execute run.py using python. 
 
-###Steps:
+Steps:
 --Clone this repo.
 --Open a terminal.
 --Run the command:
