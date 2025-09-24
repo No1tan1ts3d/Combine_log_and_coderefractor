@@ -22,7 +22,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("C/C++ Code Refractor with C90 Compliance")
+st.title("C/C++ Code Refractor")
 
 st.write(
     "Paste your C/C++ code or upload files. The app instruments function entry/exit, parameters, "
@@ -272,5 +272,6 @@ with st.expander("ℹ️ Tool Information"):
     ✅ **Avoids compilation errors** from mixed declarations and code  
     
     """)
+
 
 
