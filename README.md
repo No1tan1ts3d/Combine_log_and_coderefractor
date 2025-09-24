@@ -2,10 +2,10 @@
 ## Clone this repo and directly execute run.py using python. 
 
 Steps:
-*Clone this repo.
-*Open a terminal.
-*Run the command:
-bash
+- Clone this repo.
+- Open a terminal.
+- Run the command:
+
 ````
 python run.py
 ````
