@@ -1,8 +1,8 @@
 import re
 from typing import List, Tuple, Dict, Optional
 
-from logging_utils import build_log_line, build_exit_log_line, build_value_log
-from parsing_utils import (
+from modules.logging_utils import build_log_line, build_exit_log_line, build_value_log
+from modules.parsing_utils import (
     strip_line_comment_aware,
     find_matching_brace,
     find_declarations_end,
@@ -322,5 +322,6 @@ def add_debug_statements(code: str,
         last_index = close_brace_index + 1
     result_parts.append(code[last_index:])
     return ''.join(result_parts)
+
 
 
