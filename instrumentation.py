@@ -240,6 +240,36 @@ def add_debug_statements(code: str,
         new_body = body
         if not already_instrumented:
             decl_end_idx = find_declarations_end(body)
+            # Robust C90 placement: recompute a conservative declaration region
+            # at the top of the block regardless of the initial detector's result.
+            lines = body.split('\n')
+            last_decl_line = -1
+            primitive_or_known_types = (
+                r'(?:void|bool|_Bool|char|short|int|long|float|double|size_t|ssize_t|u8|u16|u32|u64|s8|s16|s32|s64|dma_addr_t|uintptr_t|intptr_t)'
+            )
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if not stripped or stripped.startswith('#') or stripped.startswith('//') or stripped.startswith('/*'):
+                    continue
+                core = strip_line_comment_aware(line)
+                dec = detect_simple_declaration(core)
+                if dec:
+                    last_decl_line = i
+                    continue
+                # Fallback heuristic similar to parsing_utils.find_declarations_end
+                # Allow pointer stars adjacent to identifier: e.g., "*xpdev"
+                if re.match(rf'^\s*(?:const\s+|volatile\s+|static\s+)?(?:struct\s+\w+|union\s+\w+|enum\s+\w+|{primitive_or_known_types})\s*(?:\*+\s*)?[A-Za-z_]\w*\s*(?:;|=)', core) and not re.search(r'\([^)]*\)', core):
+                    last_decl_line = i
+                    continue
+                # first non-declaration statement ends the declaration block
+                break
+            if last_decl_line >= 0:
+                char_index = 0
+                for j in range(last_decl_line + 1):
+                    if j < len(lines):
+                        char_index += len(lines[j]) + 1
+                # Use the max to ensure we don't insert before declarations
+                decl_end_idx = max(decl_end_idx, char_index)
             # Guard against incorrect end index pointing to or past the end of body
             if decl_end_idx <= 0 or decl_end_idx >= len(body):
                 decl_part = ""
