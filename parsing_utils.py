@@ -300,7 +300,8 @@ def detect_simple_declaration(line: str) -> Optional[Tuple[str, str, bool]]:
     core = strip_line_comment_aware(line)
     if ',' in core:
         return None
-    m = re.match(r'^\s*([^;=]+?)\s+([A-Za-z_]\w*)\s*(=\s*[^;]+)?\s*;\s*$', core)
+    # Allow pointer stars adjacent to the variable name (e.g., "*name" or "**name")
+    m = re.match(r'^\s*([^;=]+?)\s+(?:\*+\s*)?([A-Za-z_]\w*)\s*(=\s*[^;]+)?\s*;\s*$', core)
     if not m:
         return None
     type_str = m.group(1).strip()
