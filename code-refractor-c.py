@@ -1,7 +1,8 @@
 import streamlit as st
 from instrumentation import add_debug_statements
-from kernel_utils import add_kernel_includes
-from zip_utils import create_zip_download
+from modules.kernel_utils import add_kernel_includes
+from modules.zip_utils import create_zip_download
+
 
 
 # ---- Streamlit UI ----
@@ -272,6 +273,7 @@ with st.expander("ℹ️ Tool Information"):
     ✅ **Avoids compilation errors** from mixed declarations and code  
     
     """)
+
 
 
 
