@@ -55,12 +55,14 @@ def instrument_body_for_values(body: str,
             header_core = strip_line_comment_aware(ln).strip()
             is_if_like = header_core.startswith('if') or header_core.startswith('else if')
             has_open_brace = '{' in ln
-            if is_if_like and not has_open_brace:
-                # Peek ahead to the next non-empty logical line
-                # If the next significant line starts with '{', we allow, else skip
-                # (simple heuristic; avoids clutter on single-statement ifs)
-                pass  # Do not add msg for single-statement if without '{'
-            else:
+            # if is_if_like and not has_open_brace:
+            #     # Peek ahead to the next non-empty logical line
+            #     # If the next significant line starts with '{', we allow, else skip
+            #     # (simple heuristic; avoids clutter on single-statement ifs)
+            #     pass  # Do not add msg for single-statement if without '{'
+            # else:
+            #     new_lines.append(indent + msg)
+            if not (is_if_like and not has_open_brace):
                 new_lines.append(indent + msg)
         if print_decls and declarations_ended:
             dec = detect_simple_declaration(ln)
@@ -322,6 +324,7 @@ def add_debug_statements(code: str,
         last_index = close_brace_index + 1
     result_parts.append(code[last_index:])
     return ''.join(result_parts)
+
 
 
 
