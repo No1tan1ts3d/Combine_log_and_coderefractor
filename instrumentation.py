@@ -187,6 +187,29 @@ def insert_exit_before_returns(body: str, exit_line_builder: str, default_indent
                 same_line_prefix = body[line_start:i]
                 if not single_stmt_control and re.search(r'\b(if|else\s+if|else|for|while|switch)\b[^\n\{]*$', same_line_prefix) and '{' not in same_line_prefix:
                     single_stmt_control = True
+                # NEW: handle common two-line pattern where the control header is on the
+                # previous non-empty line, followed by a single "return ...;" line.
+                if not single_stmt_control:
+                    # Find previous significant (non-empty, non-preprocessor) line
+                    search_pos = line_start
+                    # Walk backwards up to 5 logical lines looking for a control header without '{'
+                    for _ in range(5):
+                        prev_nl = body.rfind('\n', 0, max(0, search_pos - 1))
+                        prev_line_start = prev_nl + 1 if prev_nl != -1 else 0
+                        prev_line_raw = body[prev_line_start:search_pos]
+                        search_pos = prev_line_start
+                        prev_line = prev_line_raw.strip()
+                        if not prev_line:
+                            continue
+                        prev_core = strip_line_comment_aware(prev_line)
+                        if not prev_core or prev_core.startswith('#'):
+                            continue
+                        # Stop if we hit a block/opening brace before finding a header
+                        if '{' in prev_core or prev_core.endswith(';'):
+                            break
+                        if re.match(r'^(?:if\s*\([^)]*\)|else\s+if\s*\([^)]*\)|else\b|for\s*\([^)]*\)|while\s*\([^)]*\)|switch\s*\([^)]*\))\s*(?!\{)\s*$', prev_core):
+                            single_stmt_control = True
+                            break
                 if not single_stmt_control:
                     return_start = i + 6
                     return_end = body.find(';', return_start)
@@ -330,10 +353,13 @@ def add_debug_statements(code: str,
                                                  known_types,
                                                  is_kernel_driver)
             if final_exit_always:
-                # Skip appending a trailing exit if there are any returns present
-                # to avoid unreachable duplicate exit logs after a return.
-                has_return = re.search(r'(?<![A-Za-z0-9_])return(?![A-Za-z0-9_])', new_body) is not None
-                if not has_return:
+                # Append a trailing exit when there is a fallthrough path.
+                # Consider there to be a fallthrough if the function body does not
+                # syntactically end with a return statement in the last non-empty line.
+                has_any_return = re.search(r'(?<![A-Za-z0-9_])return(?![A-Za-z0-9_])', new_body) is not None
+                last_line = strip_line_comment_aware(new_body.rstrip().split('\n')[-1]).strip()
+                ends_with_return = bool(re.search(r'(?<![A-Za-z0-9_])return\b', last_line)) and last_line.endswith(';')
+                if (not has_any_return) or (has_any_return and not ends_with_return):
                     if not new_body.endswith('\n'):
                         new_body += '\n'
                     new_body += f"{base_indent}{exit_line}\n"
