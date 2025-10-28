@@ -172,11 +172,27 @@ def insert_exit_before_returns(body: str, exit_line_builder: str, default_indent
             before = body[i - 1] if i > 0 else ' '
             after = body[i + 6] if i + 6 < len(body) else ' '
             if not (before.isalnum() or before == '_') and not (after.isalnum() or after == '_'):
-                return_start = i + 6
-                return_end = body.find(';', return_start)
-                if return_end != -1:
-                    return_expr = body[return_start:return_end].strip()
-                    append_exit_and_return_value(return_expr)
+                # Determine if this return is part of a single-statement control without braces,
+                # e.g., "if (cond) return x;" or "else return;". If so, skip inserting exit here
+                # to preserve semantics of the control structure.
+                line_start = body.rfind('\n', 0, i) + 1
+                semicolon_end = body.find(';', i)
+                stmt_slice_end = semicolon_end if semicolon_end != -1 else i
+                line_to_return = body[line_start:i].lstrip()
+                single_stmt_control = False
+                # Match patterns like: if (...) return, else if (...) return, else return, for/while (...) return, switch(...) return
+                if re.search(r'^(?:if\s*\([^)]*\)|else\s+if\s*\([^)]*\)|else\b|for\s*\([^)]*\)|while\s*\([^)]*\)|switch\s*\([^)]*\))\s*$', line_to_return):
+                    single_stmt_control = True
+                # Also handle compact same-line pattern: if (...) return ...; (no opening brace before return on same line)
+                same_line_prefix = body[line_start:i]
+                if not single_stmt_control and re.search(r'\b(if|else\s+if|else|for|while|switch)\b[^\n\{]*$', same_line_prefix) and '{' not in same_line_prefix:
+                    single_stmt_control = True
+                if not single_stmt_control:
+                    return_start = i + 6
+                    return_end = body.find(';', return_start)
+                    if return_end != -1:
+                        return_expr = body[return_start:return_end].strip()
+                        append_exit_and_return_value(return_expr)
         res.append(ch)
         i += 1
     return ''.join(res)
@@ -299,7 +315,9 @@ def add_debug_statements(code: str,
                 new_body = decl_part + instrumentation_block + code_part
             else:
                 new_body = instrumentation_block + code_part
-            if add_exit_before_returns:
+            # If entry/exit is requested, ensure exits are injected before returns even if the
+            # caller did not explicitly enable add_exit_before_returns.
+            if add_exit_before_returns or add_entry_exit:
                 new_body = insert_exit_before_returns(new_body, exit_line, base_indent, log_style, device_expr, is_kernel_driver)
             new_body = instrument_body_for_values(new_body,
                                                  func_name,
