@@ -354,13 +354,19 @@ def add_debug_statements(code: str,
                                                  known_types,
                                                  is_kernel_driver)
             if final_exit_always:
-                # Append a trailing exit when there is a fallthrough path.
-                # Consider there to be a fallthrough if the function body does not
-                # syntactically end with a return statement in the last non-empty line.
-                has_any_return = re.search(r'(?<![A-Za-z0-9_])return(?![A-Za-z0-9_])', new_body) is not None
-                last_line = strip_line_comment_aware(new_body.rstrip().split('\n')[-1]).strip()
-                ends_with_return = bool(re.search(r'(?<![A-Za-z0-9_])return\b', last_line)) and last_line.endswith(';')
-                if (not has_any_return) or (has_any_return and not ends_with_return):
+                # If the last non-empty, non-comment line is a return statement,
+                # insert the exit log just before that return to avoid unreachable code.
+                lines = new_body.rstrip().split('\n')
+                # Find last non-empty, non-comment line
+                idx = len(lines) - 1
+                while idx >= 0 and not strip_line_comment_aware(lines[idx]).strip():
+                    idx -= 1
+                if idx >= 0 and re.match(r'\s*return\b', strip_line_comment_aware(lines[idx]).strip()):
+                    # Insert before this line
+                    lines.insert(idx, f"{base_indent}{exit_line}")
+                    new_body = '\n'.join(lines)
+                else:
+                    # Append at end
                     if not new_body.endswith('\n'):
                         new_body += '\n'
                     new_body += f"{base_indent}{exit_line}\n"
