@@ -85,7 +85,7 @@ def instrument_body_for_values(body: str,
     return '\n'.join(new_lines)
 
 
-def insert_exit_before_returns(body: str, exit_line_builder: str, default_indent: str, log_style: str, device_expr: str, is_kernel_driver: bool) -> str:
+def insert_exit_before_returns(body: str, exit_line_builder: str, default_indent: str, log_style: str, device_expr: str, is_kernel_driver: bool, log_return_value: bool = True) -> str:
     i = 0
     res: List[str] = []
     in_line_comment = False
@@ -101,7 +101,7 @@ def insert_exit_before_returns(body: str, exit_line_builder: str, default_indent
         res.append(default_indent)
         res.append(exit_line_builder)
         res.append('\n')
-        if return_expr.strip():
+        if return_expr.strip() and log_return_value:
             if is_kernel_driver:
                 res.append(f'{default_indent}printk(KERN_INFO "return value: %d\\n", {return_expr.strip()});\n')
             else:
@@ -341,7 +341,8 @@ def add_debug_statements(code: str,
             # If entry/exit is requested, ensure exits are injected before returns even if the
             # caller did not explicitly enable add_exit_before_returns.
             if add_exit_before_returns or add_entry_exit:
-                new_body = insert_exit_before_returns(new_body, exit_line, base_indent, log_style, device_expr, is_kernel_driver)
+                # Only log return values if add_exit_before_returns is True
+                new_body = insert_exit_before_returns(new_body, exit_line, base_indent, log_style, device_expr, is_kernel_driver, log_return_value=add_exit_before_returns)
             new_body = instrument_body_for_values(new_body,
                                                  func_name,
                                                  log_style,
