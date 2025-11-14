@@ -134,6 +134,36 @@ def find_matching_brace(code: str, open_index: int) -> int:
     return -1
 
 
+# def find_declarations_end(body: str) -> int:
+#     lines = body.split('\n')
+#     last_declaration_line = -1
+#     primitive_or_known_types = (
+#         r'(?:void|bool|_Bool|char|short|int|long|float|double|size_t|ssize_t|u8|u16|u32|u64|s8|s16|s32|s64|dma_addr_t|uintptr_t|intptr_t)'
+#     )
+#     for i, line in enumerate(lines):
+#         stripped = line.strip()
+#         if not stripped or stripped.startswith('#') or stripped.startswith('//') or stripped.startswith('/*'):
+#             continue
+#         if any(keyword in stripped for keyword in ['printk', 'printf', 'pr_info', 'pr_debug', 'dev_dbg']):
+#             continue
+#         core = strip_line_comment_aware(line)
+#         from typing import Optional as _Optional  # avoid import cycle hints
+#         dec = detect_simple_declaration(core)
+#         if dec:
+#             last_declaration_line = i
+#             continue
+#         if re.match(rf'^\s*(?:const\s+|volatile\s+|static\s+)?(?:struct\s+\w+|union\s+\w+|enum\s+\w+|{primitive_or_known_types})(?:\s*\*+)?\s+[A-Za-z_]\w*\s*(?:;|=)', core) and not re.search(r'\([^)]*\)', core):
+#             last_declaration_line = i
+#             continue
+#         break
+#     if last_declaration_line == -1:
+#         return 0
+#     char_index = 0
+#     for i in range(last_declaration_line + 1):
+#         if i < len(lines):
+#             char_index += len(lines[i]) + 1
+#     return char_index
+
 def find_declarations_end(body: str) -> int:
     lines = body.split('\n')
     last_declaration_line = -1
@@ -143,25 +173,24 @@ def find_declarations_end(body: str) -> int:
     for i, line in enumerate(lines):
         stripped = line.strip()
         if not stripped or stripped.startswith('#') or stripped.startswith('//') or stripped.startswith('/*'):
-            continue
+            continue  # Skip empty lines and comments
         if any(keyword in stripped for keyword in ['printk', 'printf', 'pr_info', 'pr_debug', 'dev_dbg']):
-            continue
+            break  # Stop when we hit logging statements
         core = strip_line_comment_aware(line)
-        from typing import Optional as _Optional  # avoid import cycle hints
         dec = detect_simple_declaration(core)
         if dec:
-            last_declaration_line = i
+            last_declaration_line = i  # Update to current line
             continue
         if re.match(rf'^\s*(?:const\s+|volatile\s+|static\s+)?(?:struct\s+\w+|union\s+\w+|enum\s+\w+|{primitive_or_known_types})(?:\s*\*+)?\s+[A-Za-z_]\w*\s*(?:;|=)', core) and not re.search(r'\([^)]*\)', core):
-            last_declaration_line = i
+            last_declaration_line = i  # Update to current line
             continue
-        break
+        break  # Stop at first non-declaration line
     if last_declaration_line == -1:
         return 0
     char_index = 0
     for i in range(last_declaration_line + 1):
         if i < len(lines):
-            char_index += len(lines[i]) + 1
+            char_index += len(lines[i]) + 1  # +1 for newline
     return char_index
 
 
@@ -326,6 +355,60 @@ KEYWORDS = {
 EXCLUDED_CALLS = {'printf', 'pr_debug', 'dev_dbg'}
 
 
+# def detect_function_calls(line: str) -> List[str]:
+#     core = strip_line_comment_aware(line)
+#     calls: List[str] = []
+#     i = 0
+#     depth = 0
+#     in_str = False
+#     in_char = False
+#     token = []
+#     while i < len(core):
+#         ch = core[i]
+#         if in_str:
+#             if ch == '\\' and i + 1 < len(core):
+#                 i += 2
+#                 continue
+#             if ch == '"':
+#                 in_str = False
+#             i += 1
+#             continue
+#         if in_char:
+#             if ch == '\\' and i + 1 < len(core):
+#                 i += 2
+#                 continue
+#             if ch == "'":
+#                 in_char = False
+#             i += 1
+#             continue
+#         if ch == '"':
+#             in_str = True
+#             i += 1
+#             continue
+#         if ch == "'":
+#             in_char = True
+#             i += 1
+#             continue
+#         if ch == '(':
+#             name = ''.join(token).strip()
+#             token = []
+#             name = re.sub(r'.*\b', '', name)
+#             m = re.search(r'([A-Za-z_]\w*)\s*$', name)
+#             if m:
+#                 fname = m.group(1)
+#                 if fname not in KEYWORDS and fname not in EXCLUDED_CALLS:
+#                     calls.append(fname)
+#             depth += 1
+#             i += 1
+#             continue
+#         if ch == ')':
+#             depth = max(0, depth - 1)
+#             i += 1
+#             continue
+#         token.append(ch)
+#         i += 1
+#     return calls
+
 def detect_function_calls(line: str) -> List[str]:
     core = strip_line_comment_aware(line)
     calls: List[str] = []
@@ -337,47 +420,48 @@ def detect_function_calls(line: str) -> List[str]:
     while i < len(core):
         ch = core[i]
         if in_str:
-            if ch == '\\' and i + 1 < len(core):
-                i += 2
-                continue
-            if ch == '"':
+            token.append(ch)
+            if ch == '\\':
+                i += 1
+                if i < len(core):
+                    token.append(core[i])
+            elif ch == '"':
                 in_str = False
             i += 1
             continue
         if in_char:
-            if ch == '\\' and i + 1 < len(core):
-                i += 2
-                continue
-            if ch == "'":
+            token.append(ch)
+            if ch == '\\':
+                i += 1
+                if i < len(core):
+                    token.append(core[i])
+            elif ch == "'":
                 in_char = False
             i += 1
             continue
         if ch == '"':
             in_str = True
+            token.append(ch)
             i += 1
             continue
         if ch == "'":
             in_char = True
+            token.append(ch)
             i += 1
             continue
         if ch == '(':
-            name = ''.join(token).strip()
-            token = []
-            name = re.sub(r'.*\b', '', name)
-            m = re.search(r'([A-Za-z_]\w*)\s*$', name)
-            if m:
-                fname = m.group(1)
-                if fname not in KEYWORDS and fname not in EXCLUDED_CALLS:
-                    calls.append(fname)
+            func_name = ''.join(token).strip()
+            if func_name and not any(kw in func_name for kw in KEYWORDS) and func_name not in EXCLUDED_CALLS:
+                calls.append(func_name)
             depth += 1
+            token = []
             i += 1
             continue
         if ch == ')':
-            depth = max(0, depth - 1)
+            depth -= 1
+            token = []
             i += 1
             continue
         token.append(ch)
         i += 1
     return calls
-
-
