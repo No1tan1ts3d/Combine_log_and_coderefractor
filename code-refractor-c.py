@@ -2,6 +2,7 @@ import streamlit as st
 from instrumentation import add_debug_statements
 from modules.kernel_utils import add_kernel_includes
 from modules.zip_utils import create_zip_download
+from modules.zip_handler import extract_zip_files, create_zip_from_dict
 
 
 
@@ -36,7 +37,7 @@ st.write("Developed and Modified by Manjil. Tool update date: 2025-10-06")
 st.divider()
 
 # Input method
-input_method = st.radio("Choose input method:", ("Paste code", "Upload file"))
+input_method = st.radio("Choose input method:", ("Paste code", "Upload file", "Upload ZIP"))
 
 code = ""
 if input_method == "Paste code":
@@ -261,6 +262,83 @@ elif input_method == "Upload file":
                             help="Download the instrumented file",
                         )
                         st.code(modified_code, language="cpp")
+
+# ZIP file upload and processing
+elif input_method == "Upload ZIP":
+    st.subheader("Upload ZIP File")
+    uploaded_zip = st.file_uploader("Choose a ZIP file", type=["zip"])
+    
+    if uploaded_zip:
+        try:
+            # Extract zip contents
+            zip_bytes = uploaded_zip.read()
+            files_dict = extract_zip_files(zip_bytes)
+            
+            st.success(f"✅ Extracted {len(files_dict)} file(s) from ZIP")
+            
+            modified_files = {}
+            
+            # Process all files in zip
+            for filename, original_code in files_dict.items():
+                code_to_process = add_kernel_includes(original_code, is_kernel_driver) if is_kernel_driver else original_code
+                
+                modified_code = add_debug_statements(
+                    code_to_process,
+                    log_style=log_style,
+                    device_expr=device_expr,
+                    add_entry_exit=add_entry_exit,
+                    add_exit_before_returns=add_exit_before_returns,
+                    print_params=print_params,
+                    print_decls=print_decls,
+                    print_assigns=print_assigns,
+                    print_calls=print_calls,
+                    print_control=print_control,
+                    final_exit_always=final_exit_always,
+                    is_kernel_driver=is_kernel_driver,
+                )
+                
+                modified_files[filename] = modified_code
+            
+            # Create download zip with original filenames
+            st.subheader("Download Modified ZIP")
+            zip_data = create_zip_from_dict(modified_files)
+            st.download_button(
+                label=f"📦 Download Modified ZIP ({len(modified_files)} files)",
+                data=zip_data,
+                file_name="modified_code.zip",
+                mime="application/zip",
+                type="primary"
+            )
+            
+            st.divider()
+            st.subheader("File Preview")
+            
+            # Show file list
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Original Files**")
+                for fname in files_dict.keys():
+                    st.caption(f"📄 {fname}")
+            
+            with col2:
+                st.markdown("**Modified Files (Ready to Download)**")
+                for fname in modified_files.keys():
+                    st.caption(f"✅ {fname}")
+            
+            # Optional: Show detailed preview in expander
+            with st.expander("📋 Preview File Contents"):
+                selected_file = st.selectbox("Select file to preview:", list(modified_files.keys()))
+                if selected_file:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Original: {selected_file}**")
+                        st.code(files_dict[selected_file], language="cpp")
+                    with col2:
+                        st.markdown(f"**Modified: {selected_file}**")
+                        st.code(modified_files[selected_file], language="cpp")
+        
+        except Exception as e:
+            st.error(f"❌ Error processing ZIP file: {str(e)}")
 
 # Help section
 with st.expander("ℹ️ Tool Information"):
