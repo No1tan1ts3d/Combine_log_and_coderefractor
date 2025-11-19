@@ -297,11 +297,11 @@ elif input_method == "Upload ZIP":
                     is_kernel_driver=is_kernel_driver,
                 )
                 
-                modified_files[filename] = modified_code
+                modified_files[filename] = modified_code  # Keep original filename as key
             
             # Create download zip with original filenames
             st.subheader("Download Modified ZIP")
-            zip_data = create_zip_from_dict(modified_files)
+            zip_data = create_zip_from_dict(modified_files)  # This preserves original filenames
             st.download_button(
                 label=f"📦 Download Modified ZIP ({len(modified_files)} files)",
                 data=zip_data,

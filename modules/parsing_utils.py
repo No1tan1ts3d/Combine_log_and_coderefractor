@@ -181,7 +181,8 @@ def find_declarations_end(body: str) -> int:
         if dec:
             last_declaration_line = i  # Update to current line
             continue
-        if re.match(rf'^\s*(?:const\s+|volatile\s+|static\s+)?(?:struct\s+\w+|union\s+\w+|enum\s+\w+|{primitive_or_known_types})(?:\s*\*+)?\s+[A-Za-z_]\w*\s*(?:;|=)', core) and not re.search(r'\([^)]*\)', core):
+        # Updated regex to handle array declarations: [type] [*] name[size] [= init];
+        if re.match(rf'^\s*(?:const\s+|volatile\s+|static\s+)?(?:struct\s+\w+|union\s+\w+|enum\s+\w+|{primitive_or_known_types})(?:\s*\*+)?\s+[A-Za-z_]\w*(?:\s*\[[^\]]*\])?\s*(?:;|=)', core) and not re.search(r'\([^)]*\)', core):
             last_declaration_line = i  # Update to current line
             continue
         break  # Stop at first non-declaration line
@@ -325,7 +326,8 @@ def detect_simple_declaration(line: str) -> Optional[Tuple[str, str, bool]]:
     core = strip_line_comment_aware(line)
     if ',' in core:
         return None
-    m = re.match(r'^\s*([^;=]+?)\s+(?:\*+\s*)?([A-Za-z_]\w*)\s*(=\s*[^;]+)?\s*;\s*$', core)
+    # Updated regex to handle array declarations with brackets
+    m = re.match(r'^\s*([^;=\[\]]+?)\s+(?:\*+\s*)?([A-Za-z_]\w*)(?:\s*\[[^\]]*\])?\s*(=\s*[^;]+)?\s*;\s*$', core)
     if not m:
         return None
     type_str = m.group(1).strip()

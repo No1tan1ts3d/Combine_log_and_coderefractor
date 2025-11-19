@@ -299,7 +299,7 @@ def add_debug_statements(code: str,
                     continue
                 # Fallback heuristic similar to parsing_utils.find_declarations_end
                 # Allow pointer stars adjacent to identifier: e.g., "*xpdev"
-                if re.match(rf'^\s*(?:const\s+|volatile\s+|static\s+)?(?:struct\s+\w+|union\s+\w+|enum\s+\w+|{primitive_or_known_types})\s*(?:\*+\s*)?[A-Za-z_]\w*\s*(?:;|=)', core) and not re.search(r'\([^)]*\)', core):
+                if re.match(rf'^\s*(?:const\s+|volatile\s+|static\s+)?(?:struct\s+\w+|union\s+\w+|enum\s+\w+|{primitive_or_known_types})\s*(?:\*+\s*)?[A-Za-z_]\w*(?:\s*\[[^\]]*\])?\s*(?:;|=)', core) and not re.search(r'\([^)]*\)', core):
                     last_decl_line = i
                     continue
                 # first non-declaration statement ends the declaration block
@@ -338,11 +338,12 @@ def add_debug_statements(code: str,
                 new_body = decl_part + instrumentation_block + code_part
             else:
                 new_body = instrumentation_block + code_part
-            # If entry/exit is requested, ensure exits are injected before returns even if the
-            # caller did not explicitly enable add_exit_before_returns.
-            if add_exit_before_returns or add_entry_exit:
-                # Only log return values if add_exit_before_returns is True
-                new_body = insert_exit_before_returns(new_body, exit_line, base_indent, log_style, device_expr, is_kernel_driver, log_return_value=add_exit_before_returns)
+            
+            # CRITICAL: Process returns BEFORE instrument_body_for_values to maintain declaration ordering
+            if add_exit_before_returns:
+                new_body = insert_exit_before_returns(new_body, exit_line, base_indent, log_style, device_expr, is_kernel_driver, log_return_value=True)
+            
+            # Now apply value instrumentation after return handling
             new_body = instrument_body_for_values(new_body,
                                                  func_name,
                                                  log_style,
@@ -353,7 +354,9 @@ def add_debug_statements(code: str,
                                                  print_control,
                                                  known_types,
                                                  is_kernel_driver)
-            if final_exit_always:
+            
+            # Only add final exit if add_exit_before_returns is False (to avoid duplicates)
+            if final_exit_always and not add_exit_before_returns:
                 # If the last non-empty, non-comment line is a return statement,
                 # insert the exit log just before that return to avoid unreachable code.
                 lines = new_body.rstrip().split('\n')
