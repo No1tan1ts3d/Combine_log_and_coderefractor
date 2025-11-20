@@ -87,12 +87,12 @@ tog_l, tog_r = st.columns(2)
 with tog_l:
     add_entry_exit = st.checkbox("Add entry/exit logs", value=True)
     add_exit_before_returns = st.checkbox("Add exit before each return", value=True)
-    final_exit_always = st.checkbox("Always append a final exit log", value=True)
+    final_exit_always = st.checkbox("Always append a final exit log", value=False)
 with tog_r:
-    print_params = st.checkbox("Print parameter values at entry", value=True)
-    print_decls = st.checkbox("Print initial values for simple declarations", value=True)
-    print_assigns = st.checkbox("Print values after simple assignments", value=True)
-    print_calls = st.checkbox("Print when calling functions (best-effort)", value=True)
+    print_params = st.checkbox("Print parameter values at entry", value=False)
+    print_decls = st.checkbox("Print initial values for simple declarations", value=False)
+    print_assigns = st.checkbox("Print values after simple assignments", value=False)
+    print_calls = st.checkbox("Print when calling functions (best-effort)", value=False)
     print_control = st.checkbox("Print control-flow entries (if/for/while/switch)", value=False)
 
 # Override with quick selections if any chosen
