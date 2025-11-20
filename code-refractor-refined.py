@@ -14,7 +14,7 @@ st.markdown(
     .stDownloadButton > button {
         padding: 0.55rem 1rem;
         border-radius: 8px;
-        font-weight: 600;
+        font-weight: 800;
     }
     .form-hint { color: rgba(120,120,120,0.95); font-size: 0.9rem; }
     .section { padding: 0.2rem 0.4rem; border: 1px solid rgba(150,150,150,0.15); border-radius: 8px; }
